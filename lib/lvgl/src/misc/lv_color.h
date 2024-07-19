@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file lv_color.h
  *
  */
@@ -17,8 +17,6 @@ extern "C" {
 #include "lv_assert.h"
 #include "lv_math.h"
 #include "lv_types.h"
-#include <stdint.h>
-#include <stdbool.h>
 
 /*********************
  *      DEFINES
@@ -64,6 +62,12 @@ typedef uint8_t lv_opa_t;
 #define LV_OPA_MIN 2    /*Opacities below this will be transparent*/
 #define LV_OPA_MAX 253  /*Opacities above this will fully cover*/
 
+/**
+ * Get the pixel size of a color format in bits, bpp
+ * @param cf        a color format (`LV_COLOR_FORMAT_...`)
+ * @return          the pixel size in bits
+ * @sa              lv_color_format_get_bpp
+ */
 #define LV_COLOR_FORMAT_GET_BPP(cf) (       \
                                             (cf) == LV_COLOR_FORMAT_I1 ? 1 :        \
                                             (cf) == LV_COLOR_FORMAT_A1 ? 1 :        \
@@ -74,6 +78,7 @@ typedef uint8_t lv_opa_t;
                                             (cf) == LV_COLOR_FORMAT_L8 ? 8 :        \
                                             (cf) == LV_COLOR_FORMAT_A8 ? 8 :        \
                                             (cf) == LV_COLOR_FORMAT_I8 ? 8 :        \
+                                            (cf) == LV_COLOR_FORMAT_AL88 ? 16 :     \
                                             (cf) == LV_COLOR_FORMAT_RGB565 ? 16 :   \
                                             (cf) == LV_COLOR_FORMAT_RGB565A8 ? 16 : \
                                             (cf) == LV_COLOR_FORMAT_ARGB8565 ? 24 : \
@@ -82,6 +87,14 @@ typedef uint8_t lv_opa_t;
                                             (cf) == LV_COLOR_FORMAT_XRGB8888 ? 32 : \
                                             0                                       \
                                     )
+
+/**
+ * Get the pixel size of a color format in bytes
+ * @param cf        a color format (`LV_COLOR_FORMAT_...`)
+ * @return          the pixel size in bytes
+ * @sa              lv_color_format_get_size
+ */
+#define LV_COLOR_FORMAT_GET_SIZE(cf) ((LV_COLOR_FORMAT_GET_BPP(cf) + 7) >> 3)
 
 /**********************
  *      TYPEDEFS
@@ -112,6 +125,11 @@ typedef struct {
     uint8_t v;
 } lv_color_hsv_t;
 
+typedef struct {
+    uint8_t lumi;
+    uint8_t alpha;
+} lv_color16a_t;
+
 enum _lv_color_format_t {
     LV_COLOR_FORMAT_UNKNOWN           = 0,
 
@@ -129,7 +147,8 @@ enum _lv_color_format_t {
     /*2 byte (+alpha) formats*/
     LV_COLOR_FORMAT_RGB565            = 0x12,
     LV_COLOR_FORMAT_ARGB8565          = 0x13,   /**< Not supported by sw renderer yet. */
-    LV_COLOR_FORMAT_RGB565A8          = 0x14    /**< Color array followed by Alpha array*/,
+    LV_COLOR_FORMAT_RGB565A8          = 0x14,   /**< Color array followed by Alpha array*/
+    LV_COLOR_FORMAT_AL88              = 0x15,   /**< L8 with alpha >*/
 
     /*3 byte (+alpha) formats*/
     LV_COLOR_FORMAT_RGB888            = 0x0F,
@@ -160,6 +179,7 @@ enum _lv_color_format_t {
     /*Color formats in which LVGL can render*/
 #if LV_COLOR_DEPTH == 8
     LV_COLOR_FORMAT_NATIVE            = LV_COLOR_FORMAT_L8,
+    LV_COLOR_FORMAT_NATIVE_WITH_ALPHA = LV_COLOR_FORMAT_AL88,
 #elif LV_COLOR_DEPTH == 16
     LV_COLOR_FORMAT_NATIVE            = LV_COLOR_FORMAT_RGB565,
     LV_COLOR_FORMAT_NATIVE_WITH_ALPHA = LV_COLOR_FORMAT_RGB565A8,
@@ -201,15 +221,17 @@ typedef uint8_t lv_color_format_t;
 
 /**
  * Get the pixel size of a color format in bits, bpp
- * @param src_cf    a color format (`LV_COLOR_FORMAT_...`)
+ * @param cf        a color format (`LV_COLOR_FORMAT_...`)
  * @return          the pixel size in bits
+ * @sa              LV_COLOR_FORMAT_GET_BPP
  */
 uint8_t lv_color_format_get_bpp(lv_color_format_t cf);
 
 /**
  * Get the pixel size of a color format in bytes
- * @param src_cf    a color format (`LV_COLOR_FORMAT_...`)
+ * @param cf        a color format (`LV_COLOR_FORMAT_...`)
  * @return          the pixel size in bytes
+ * @sa              LV_COLOR_FORMAT_GET_SIZE
  */
 static inline uint8_t lv_color_format_get_size(lv_color_format_t cf)
 {
@@ -350,6 +372,7 @@ static inline uint16_t LV_ATTRIBUTE_FAST_MEM lv_color_16_16_mix(uint16_t c1, uin
 {
     if(mix == 255) return c1;
     if(mix == 0) return c2;
+    if(c1 == c2) return c1;
 
     uint16_t ret;
 
@@ -428,6 +451,15 @@ static inline lv_color_t lv_color_black(void)
 
 static inline void lv_color_premultiply(lv_color32_t * c)
 {
+    if(c->alpha == LV_OPA_COVER) {
+        return;
+    }
+
+    if(c->alpha == LV_OPA_TRANSP) {
+        lv_memzero(c, sizeof(lv_color32_t));
+        return;
+    }
+
     c->red = LV_OPA_MIX2(c->red, c->alpha);
     c->green = LV_OPA_MIX2(c->green, c->alpha);
     c->blue = LV_OPA_MIX2(c->blue, c->alpha);
@@ -435,9 +467,58 @@ static inline void lv_color_premultiply(lv_color32_t * c)
 
 static inline void lv_color16_premultiply(lv_color16_t * c, lv_opa_t a)
 {
+    if(a == LV_OPA_COVER) {
+        return;
+    }
+
+    if(a == LV_OPA_TRANSP) {
+        lv_memzero(c, sizeof(lv_color16_t));
+        return;
+    }
+
     c->red = LV_OPA_MIX2(c->red, a);
     c->green = LV_OPA_MIX2(c->green, a);
     c->blue = LV_OPA_MIX2(c->blue, a);
+}
+
+/**
+ * Get the luminance of a color: luminance = 0.3 R + 0.59 G + 0.11 B
+ * @param color a color
+ * @return the brightness [0..255]
+ */
+static inline uint8_t lv_color_luminance(lv_color_t c)
+{
+    return (uint8_t)((uint16_t)(77u * c.red + 151u * c.green + 28u * c.blue) >> 8);
+}
+
+/**
+ * Get the luminance of a color16: luminance = 0.3 R + 0.59 G + 0.11 B
+ * @param color a color
+ * @return the brightness [0..255]
+ */
+static inline uint8_t lv_color16_luminance(const lv_color16_t c)
+{
+    return (uint8_t)((uint16_t)(635u * c.red + 613u * c.green + 231u * c.blue) >> 8);
+}
+
+/**
+ * Get the luminance of a color24: luminance = 0.3 R + 0.59 G + 0.11 B
+ * @param color a color
+ * @return the brightness [0..255]
+ */
+static inline uint8_t lv_color24_luminance(const uint8_t * c)
+{
+    return (uint8_t)((uint16_t)(77u * c[2] + 151u * c[1] + 28u * c[0]) >> 8);
+}
+
+/**
+ * Get the luminance of a color32: luminance = 0.3 R + 0.59 G + 0.11 B
+ * @param color a color
+ * @return the brightness [0..255]
+ */
+static inline uint8_t lv_color32_luminance(lv_color32_t c)
+{
+    return (uint8_t)((uint16_t)(77u * c.red + 151u * c.green + 28u * c.blue) >> 8);
 }
 
 /**********************

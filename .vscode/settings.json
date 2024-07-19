@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "lv_log.h": "c"
+        "lv_log.h": "c",
+        "ui_comp.h": "c"
     }
 }
